@@ -19,10 +19,10 @@ use crate::{
     system::{
         fork, getpgid, getpgrp,
         interface::ProcessId,
-        kill, killpg,
+        kill, killpg, mark_fds_as_cloexec,
         term::{Terminal, UserTerm},
         wait::WaitOptions,
-        FileCloser, ForkResult,
+        ForkResult,
     },
 };
 
@@ -49,17 +49,13 @@ pub(super) fn exec_no_pty(
     // Use a pipe to get the IO error if `exec` fails.
     let (errpipe_tx, errpipe_rx) = BinPipe::pair()?;
 
-    // Don't close the error pipe as we need it to retrieve the error code if the command execution
-    // fails.
-    file_closer.except(&errpipe_tx);
-
     // SAFETY: There should be no other threads at this point.
     let ForkResult::Parent(command_pid) = unsafe { fork() }.map_err(|err| {
         dev_warn!("unable to fork command process: {err}");
         err
     })?
     else {
-        exec_command(file_closer, command, original_set, errpipe_tx);
+        exec_command(command, original_set, errpipe_tx);
     };
 
     if let Some(spawner) = spawn_noexec_handler {

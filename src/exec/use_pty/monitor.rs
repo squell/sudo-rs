@@ -20,7 +20,7 @@ use crate::{
         use_pty::{SIGCONT_BG, SIGCONT_FG},
     },
     log::{dev_error, dev_info, dev_warn},
-    system::FileCloser,
+    system::mark_fds_as_cloexec,
 };
 use crate::{
     exec::{handle_sigchld, terminate_process, HandleSigchld},
@@ -41,7 +41,6 @@ pub(super) fn exec_monitor(
     command: Command,
     foreground: bool,
     backchannel: &mut MonitorBackchannel,
-    mut file_closer: FileCloser,
     original_set: Option<SignalSet>,
 ) -> io::Result<Infallible> {
     // SIGTTIN and SIGTTOU are ignored here but the docs state that it shouldn't
@@ -69,10 +68,6 @@ pub(super) fn exec_monitor(
 
     // Use a pipe to get the IO error if `exec_command` fails.
     let (errpipe_tx, errpipe_rx) = BinPipe::pair()?;
-
-    // Don't close the error pipe as we need it to retrieve the error code if the command execution
-    // fails.
-    file_closer.except(&errpipe_tx);
 
     // Wait for the parent to give us green light before spawning the command. This avoids race
     // conditions when the command exits quickly.
@@ -110,7 +105,7 @@ pub(super) fn exec_monitor(
         // Done with the pty follower.
         drop(pty_follower);
 
-        exec_command(file_closer, command, original_set, errpipe_tx)
+        exec_command(command, original_set, errpipe_tx)
     };
 
     // Send the command's PID to the parent.
